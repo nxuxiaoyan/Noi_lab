@@ -1,0 +1,107 @@
+rm(list=ls())
+
+Afun <- function(t) { log(1 + exp(t)) }
+A1fun <- function(t) { exp(t) / (1 + exp(t)) }
+A2fun <- function(t) { p = exp(t)/(1 + exp(t)); p - p^2 }
+Tfun <- function(z, a, b) {(z - b)/a}
+
+logspace <- function(x1, x2, n) exp(log(10)*seq(x1, x2, length.out=n))
+
+STmat <- function(A, b, tol=1e-6) {
+  svdres <- svd(A)
+  u <- svdres$u
+  v <- svdres$v
+  d <- svdres$d  
+  d[d < tol] <- 0
+  d1 <- pmax(d-b, 0)
+  Z <- u %*% diag(d1) %*% t(v)
+  return(Z)
+}
+
+# Nuclear Penalized Least Square problem. A general method for (X, Y).
+NuPenLS <- function(X, Y, lamb, ThetaInit, v_alpha=0.9, v_gamma=1, max_iters=200, err_tol=1e-4){
+
+  n <- dim(X)[1]
+  p <- dim(ThetaInit)[1]
+  q <- dim(ThetaInit)[2]
+  v_theta_k <- as.vector(ThetaInit)  
+  Theta <- matrix(0, p, q)
+  B <- matrix(0, p, q)
+  S <- matrix(0, p, q)
+  ThetaOld <- ThetaInit
+  err_list <- c()
+  mse_list <- c()
+  pen_list <- c()
+  loss_list <- c()
+  for (i in 1:max_iters) {
+    # ## updating procedure
+    temp <- 1/n* t(X) %*% Y + as.vector(S) + v_gamma * (as.vector(Theta) - v_theta_k)
+    vbeta <- solve(1/n* t(X) %*% X + v_gamma *diag(1,p*q, p*q)) %*% temp
+    B <- matrix(as.vector(vbeta), nrow=p, ncol=q)
+    S1 <- S - v_alpha * v_gamma * (B - Theta + ThetaInit)
+    Theta <- STmat(B + ThetaInit - 1/v_gamma*S1, lamb/v_gamma)
+    S <- S1 - v_alpha * v_gamma * (B - Theta + ThetaInit)
+    
+    err_cur <- sqrt(sum((Theta - ThetaOld)^2) )  ## Frobenius norm
+    err_list[i] <- err_cur
+    XT_new <- X %*% as.vector(Theta)
+    mse <- 1/(2*n) * sum((Y - XT_new)^2) 
+    pen <- lamb * sum(svd(Theta)$d)
+    mse_list[i] <- mse
+    pen_list[i] <- pen
+    loss_list[i] <- mse + pen
+    if (err_cur < err_tol) {break} else { ThetaOld <- Theta}
+  }
+  return(list(Theta=Theta, B=B, error=err_list, loss=loss_list, mse=mse_list, pen=pen_list))
+}
+
+
+# Noisy Label problem with Peaceman Rachford Split Method, here (X, Z) are obsevable.
+NL_PRSM <- function(X, Z, lamb, a, b, v_alpha=0.9, v_gamma=1, max_iters=100, err_tol=1e-4){
+  
+  n <- dim(X)[1]
+  p <- dim(X)[2]
+  q <- dim(X)[3]
+  ThetaPrev <- matrix(0, p, q)
+  err_list <- c()
+  mse_list <- c()
+  pen_list <- c()
+  loss_list <- c()
+  for (i in 1:max_iters) {
+    # ## Step1: to construct the new X, new Z
+    XTheta <- apply(X, 1, function(x) sum(as.vector(x) * as.vector(ThetaPrev)))
+    Xt <- A2fun(XTheta)^(1/2) * X
+    Z1 <- A2fun(XTheta)^(-1/2) * (Tfun(Z, a, b) - A1fun(XTheta))
+    X1 <- t(apply(Xt, 1, function(x) as.vector(x)))  # n * (pq)
+    # ## the inner loop for the Nuclear Penalized problem
+    resTemp <- NuPenLS(X1, Z1, lamb, ThetaPrev, v_alpha, v_gamma)
+    Theta <- resTemp$Theta
+    err_cur <- sqrt(sum((Theta - ThetaPrev)^2) ) 
+    err_list[i] <- err_cur
+    XT_new <- X1 %*% as.vector(Theta)
+    mse <- 1/(2*n) * sum((Z1 - XT_new)^2)
+    pen <- lamb * sum(svd(Theta)$d)
+    mse_list[i] <- mse
+    pen_list[i] <- pen
+    loss_list[i] <- mse + pen
+    if (err_cur < err_tol) {break} else { ThetaPrev <- Theta}
+  }
+  return(list(Theta=Theta, error=err_list, loss=loss_list, mse=mse_list, pen=pen_list))
+}
+
+
+# ### default vector in R is formed as p*1, but shown as num[1:p].
+LossGradFun <- function(X, Z, Theta, lamb, a=1, b=0) {
+  
+  n <- length(Z)
+  XTheta <- apply(X, 1, function(x) sum(as.vector(x) * as.vector(Theta)))
+  loss <- mean( Afun(XTheta) - Tfun(Z, a, b) * XTheta) + lamb * nuclear(Theta)
+  A1T <- (A1fun(XTheta) - Tfun(Z, a, b) )
+  gradn <- apply(A1T * X, c(2,3), sum)  # Broadcast on A1T*X
+  grad <- gradn / n
+  return(list(loss=loss, grad=grad))
+}
+
+
+
+
