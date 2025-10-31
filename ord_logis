@@ -1,0 +1,46 @@
+rm(list=ls())
+library(doParallel)
+library(foreach)
+
+A2fun <- function(t) { p = exp(t)/(1 + exp(t))}
+
+STmat <- function(A, b, tol=1e-4) {
+  svdres <- svd(A)
+  u <- svdres$u
+  v <- svdres$v
+  d <- svdres$d  
+  d[d < tol] <- 0
+  d1 <- pmax(d-b, 0)
+  Z <- u %*% diag(d1) %*% t(v)
+  return(Z)
+}
+
+# Nuclear Penalized Least Square problem. A general method for (X, Y).
+NuPenLS <- function(X, Z, lamb, delta, max_iters=200, err_tol=1e-4){
+  
+  n <- dim(X)[1]
+  p <- dim(X)[2]
+  q <- dim(X)[3]
+  Theta <- matrix(0, p, q)
+  
+  XTheta <- apply(X, 1, function(x) sum(as.vector(x) * as.vector(Theta)))
+  ex_z <- A2fun(XTheta) - Z
+  grad <- matrix(0, nrow = p, ncol = q)
+  for (i in 1:n) {
+    grad <- grad + ex_z[i] * X[i,,]
+  }
+  
+  for (i in 1:max_iters) {
+    
+    Theta_old <- Theta
+    Atemp <- Theta_old - delta * grad
+    Theta <- STmat(Atemp, delta * lamb)
+    # ## checking the errors
+    delta_Theta <- norm(Theta - Theta_old, type = "F") 
+    if (delta_Theta < err_tol) {
+      break
+    }
+    
+  }
+  return(Theta=Theta)
+}
