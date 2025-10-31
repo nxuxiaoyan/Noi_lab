@@ -1,0 +1,43 @@
+rm(list=ls())
+
+gendata <- function(n, p, q, rank, rho_0, rho_1) {
+  ### generate X_i
+  mu <- rep(0, p*q)
+  temp <- MASS::mvrnorm(n, mu, Sigma=diag(1, p*q))
+  X <- array(temp, dim=c(n,p,q))
+  
+  ### construct coeff
+  theta1 <- matrix(rnorm(rank*p), ncol=rank, nrow=p)
+  theta2 <- matrix(rnorm(rank*q), ncol=rank, nrow=q)
+  Theta0 <- theta1 %*% t(theta2)
+  svd_res0 <- svd(Theta0)
+  d <- svd_res0$d
+  d[1:rank] <- 1
+  d[(rank+1):length(d)] <- 0
+  Theta <- svd_res0$u %*% diag(d) %*% svd_res0$v
+  # ## to generate prob and y
+  p_beta <- c(rep(NA,n))
+  y <- c(rep(NA,n))
+  #construct reps
+  for (i in 1:n) {
+    XT <- sum(as.vector(X[i,,]) * as.vector(Theta))
+    p_beta[i] <- exp(XT)/(1+exp(XT)) 
+    y[i] <- rbinom(1,1,p_beta[i])
+  }
+  z <- c(rep(NA,n))
+  y_0 <- which(y==0)
+  y_1 <- which(y==1)
+  z[y_0] <- rbinom(length(y_0),1,rho_0)
+  z[y_1] <- rbinom(length(y_1),1,1-rho_1)  
+  
+  list(y = y,
+       p_beta = p_beta,
+       Theta = Theta,
+       X = X,
+       z = z
+  )
+}
+
+
+
+
